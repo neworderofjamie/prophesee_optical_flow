@@ -1,5 +1,5 @@
 OPENCV_PACKAGE                  :=opencv4
-GENERATED_CODE_DIR		:=optical_flow_CODE
+GENERATED_CODE_DIR		:=offline_optical_flow_CODE
 GENN_USERPROJECT_INCLUDE	:=$(abspath $(dir $(shell which genn-buildmodel.sh))../userproject/include)
 CXXFLAGS 			+=-std=c++11 -Wall -Wpedantic -Wextra
 
