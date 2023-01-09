@@ -45,13 +45,16 @@
 //----------------------------------------------------------------------------
 namespace
 {
-typedef void (*allocateFn)(unsigned int);
-
 volatile std::sig_atomic_t g_SignalStatus;
 
 void signalHandler(int status)
 {
     g_SignalStatus = status;
+}
+
+unsigned int getNeuronIndex(unsigned int width, unsigned int x, unsigned int y)
+{
+    return x + (y * width);
 }
 
 void loadEvents(const std::string &filename)
@@ -105,7 +108,7 @@ void loadEvents(const std::string &filename)
         const uint32_t y = (e.first & 268419072U) >> 14;
         
         // Replace event with GeNN neuron ID
-        e.first = (y * Parameters::inputWidth) + x;
+        e.first = getNeuronIndex(Parameters::inputWidth, x, y);
 
         // Increment event count
         numEvents[e.first]++;
@@ -132,10 +135,6 @@ void loadEvents(const std::string &filename)
                    [](std::pair<uint32_t, uint32_t> e) { return (float)e.second / 1000.0f; });
     
     pushspikeTimesDVSToDevice(events.size());
-}
-unsigned int getNeuronIndex(unsigned int width, unsigned int x, unsigned int y)
-{
-    return x + (y * width);
 }
 
 void buildCentreToMacroConnection(unsigned int *rowLength, unsigned int *ind)
