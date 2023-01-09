@@ -1,0 +1,21 @@
+# Ignore object files
+**/*.o
+**/*.obj
+**/*.ipdb
+**/*.pdb
+**/*.vcxproj.user
+**/*.sdf
+**/*.suo
+
+# Ignore output folders from code generation
+**/*_CODE
+
+# Ignore Visual Studio intermediate directories
+**/obj/
+**/obj_generate/
+**/x64/
+**/.vs/
+
+# Ignore generator executables
+**/generator_Release_*.*
+**/generator_Debug_*.*
