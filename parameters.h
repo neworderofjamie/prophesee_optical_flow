@@ -37,7 +37,7 @@ namespace Parameters
     constexpr unsigned int detectorHeight = macroPixelHeight - 2;
 
     constexpr unsigned int outputScale = 12;
-    constexpr unsigned int inputScale = 4;
+    constexpr unsigned int inputScale = 2;
 
     constexpr float flowPersistence = 0.94f;
     constexpr float spikePersistence = 0.97f;

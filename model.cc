@@ -57,11 +57,12 @@ void modelDefinition(NNmodel &model)
     auto *dvs = model.addNeuronPopulation<NeuronModels::SpikeSourceArray>(
         "DVS", Parameters::inputWidth * Parameters::inputHeight,
         {}, dvsInit);
+    dvs->setSpikeRecordingEnabled(true);
     model.addNeuronPopulation<NeuronModels::LIF>("MacroPixel", Parameters::macroPixelWidth * Parameters::macroPixelHeight,
                                                  lifParams, lifInit);
-
     auto *flow = model.addNeuronPopulation<NeuronModels::LIF>("Flow", Parameters::detectorWidth * Parameters::detectorHeight * Parameters::DetectorMax,
                                                               lifParams, lifInit);
+    flow->setSpikeRecordingEnabled(true);
 
     //------------------------------------------------------------------------
     // Synapse populations
@@ -87,4 +88,5 @@ void modelDefinition(NNmodel &model)
     dvsMacroPixel->setMaxConnections(1);
     macroPixelFlowExcitatory->setMaxConnections(Parameters::DetectorMax);
     macroPixelFlowInhibitory->setMaxConnections(Parameters::DetectorMax);
+    
 }

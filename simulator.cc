@@ -24,6 +24,22 @@
 // Auto-generated simulation code
 #include "offline_optical_flow_CODE/definitions.h"
 
+#ifdef _WIN32
+    #include <intrin.h>
+    int inline clz(unsigned int value)
+    {
+        unsigned long leadingZero = 0;
+        if(_BitScanReverse(&leadingZero, value)) {
+            return 31 - leadingZero;
+        }
+        else {
+            return 32;
+        }
+    }
+    // Otherwise, on *nix, use __builtin_clz intrinsic
+#else
+    #define clz __builtin_clz
+#endif
 //----------------------------------------------------------------------------
 // Anonymous namespace
 //----------------------------------------------------------------------------
@@ -280,21 +296,73 @@ void displayThreadHandler(std::mutex &inputMutex, const cv::Mat &inputImage, std
     }
 }
 
-void applyOutputSpikes(unsigned int outputSpikeCount, const unsigned int *outputSpikes, 
+void applyInputSpikes(uint32_t *inputSpikes, cv::Mat &inputImage)
+{
+    // Loop through words
+    constexpr unsigned int numWords = ((Parameters::inputWidth * Parameters::inputHeight) + 31) / 32;
+    for (unsigned int w = 0; w < numWords; w++) {
+        // Get word
+        uint32_t spikeWord = inputSpikes[w];
+
+        // Calculate neuron id of highest bit of this word
+        unsigned int neuronID = (w * 32) + 31;
+
+        // While bits remain
+        while (spikeWord != 0) {
+            // Calculate leading zeros
+            const int numLZ = clz(spikeWord);
+
+            // If all bits have now been processed, zero spike word
+            // Otherwise shift past the spike we have found
+            spikeWord = (numLZ == 31) ? 0 : (spikeWord << (numLZ + 1));
+
+            // Subtract number of leading zeros from neuron ID
+            neuronID -= numLZ;
+
+            // Add to pixel in input image
+            const auto spikeCoord = std::div((int)neuronID, (int)Parameters::inputWidth);
+            inputImage.at<float>(spikeCoord.quot, spikeCoord.rem) += 1.0f;
+                        
+            // New neuron id of the highest bit of this word
+            neuronID--;
+        }
+    }
+
+    // Decay image
+    inputImage *= Parameters::spikePersistence;
+}
+void applyOutputSpikes(uint32_t *outputSpikes, 
                        float (&output)[Parameters::detectorWidth][Parameters::detectorHeight][Parameters::DetectorAxisMax])
 {
-    // Loop through output spikes
-    for(unsigned int s = 0; s < outputSpikeCount; s++)
-    {
-        // Convert spike ID to x, y, detector
-        const unsigned int spike = outputSpikes[s];
-        const auto spikeCoord = std::div((int)spike, (int)Parameters::detectorWidth * Parameters::DetectorMax);
-        const int spikeY = spikeCoord.quot;
-        const auto xCoord = std::div(spikeCoord.rem, (int)Parameters::DetectorMax);
-        const int spikeX =  xCoord.quot;
+    // Loop through words
+    constexpr unsigned int numWords = ((Parameters::detectorWidth * Parameters::detectorHeight * Parameters::DetectorMax) + 31) / 32;
+    for(unsigned int w = 0; w < numWords; w++) {
+        // Get word
+        uint32_t spikeWord = outputSpikes[w];
+                    
+        // Calculate neuron id of highest bit of this word
+        unsigned int neuronID = (w * 32) + 31;
+                    
+        // While bits remain
+        while (spikeWord != 0) {
+            // Calculate leading zeros
+            const int numLZ = clz(spikeWord);
 
-        // Apply spike to correct axis of output pixel based on detector it was emitted by
-        switch(xCoord.rem) {
+            // If all bits have now been processed, zero spike word
+            // Otherwise shift past the spike we have found
+            spikeWord = (numLZ == 31) ? 0 : (spikeWord << (numLZ + 1));
+
+            // Subtract number of leading zeros from neuron ID
+            neuronID -= numLZ;
+
+            // Convert spike ID to x, y, detector
+            const auto spikeCoord = std::div((int)neuronID, (int)Parameters::detectorWidth * Parameters::DetectorMax);
+            const int spikeY = spikeCoord.quot;
+            const auto xCoord = std::div(spikeCoord.rem, (int)Parameters::DetectorMax);
+            const int spikeX = xCoord.quot;
+
+            // Apply spike to correct axis of output pixel based on detector it was emitted by
+            switch (xCoord.rem) {
             case Parameters::DetectorLeft:
                 output[spikeX][spikeY][0] -= 1.0f;
                 break;
@@ -310,7 +378,10 @@ void applyOutputSpikes(unsigned int outputSpikeCount, const unsigned int *output
             case Parameters::DetectorDown:
                 output[spikeX][spikeY][1] += 1.0f;
                 break;
+            }
 
+            // New neuron id of the highest bit of this word
+            neuronID--;
         }
     }
 
@@ -328,6 +399,7 @@ void applyOutputSpikes(unsigned int outputSpikeCount, const unsigned int *output
 int main()
 {
     allocateMem();
+    allocateRecordingBuffers(1);
     initialize();
     loadEvents("17-03-30_12-53-58_1098500000_1158500000_td.dat");
     buildCentreToMacroConnection(rowLengthDVS_MacroPixel, indDVS_MacroPixel);
@@ -362,59 +434,24 @@ int main()
     for(i = 0; g_SignalStatus == 0; i++)
     {
         auto tickStart = std::chrono::high_resolution_clock::now();
-
-        /*{
-            TimerAccumulate timer(render);
-            std::lock_guard<std::mutex> lock(inputMutex);
-
-            {
-                for(unsigned int w = 0; w < timestepWords; w++) {
-                    // Get word
-                    uint32_t spikeWord = spikeVectorDVS[w];
-                    
-                    // Calculate neuron id of highest bit of this word
-                    unsigned int neuronID = (w * 32) + 31;
-                    
-                    // While bits remain
-                    while(spikeWord != 0) {
-                        // Calculate leading zeros
-                        const int numLZ = __builtin_clz(spikeWord);
-                        
-                        // If all bits have now been processed, zero spike word
-                        // Otherwise shift past the spike we have found
-                        spikeWord = (numLZ == 31) ? 0 : (spikeWord << (numLZ + 1));
-                        
-                        // Subtract number of leading zeros from neuron ID
-                        neuronID -= numLZ;
-                        
-                        // Write out CSV line
-                        const auto spikeCoord = std::div((int)neuronID, (int)Parameters::inputWidth);
-                        inputImage.at<float>(spikeCoord.quot, spikeCoord.rem) += 1.0f;
-                        
-                        // New neuron id of the highest bit of this word
-                        neuronID--;
-                    }
-                }
-
-                // Decay image
-                inputImage *= Parameters::spikePersistence;
-            }
-        }*/
-
         {
             TimerAccumulate timer(step);
 
             // Simulate
             stepTime();
-            pullFlowCurrentSpikesFromDevice();
+            pullRecordingBuffersFromDevice();
         }
 
         {
             TimerAccumulate timer(render);
             {
-                // **TODO** use spikerecording with 1 timestep buffer
                 std::lock_guard<std::mutex> lock(outputMutex);
-                applyOutputSpikes(spikeCount_Flow, spike_Flow, output);
+                applyOutputSpikes(recordSpkFlow, output);
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(inputMutex);
+                applyInputSpikes(recordSpkDVS, inputImage);
             }
         }
 
