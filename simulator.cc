@@ -1,5 +1,6 @@
 // Standard C++ includes
 #include <algorithm>
+#include <atomic>
 #include <fstream>
 #include <iostream>
 #include <mutex>
@@ -45,11 +46,11 @@
 //----------------------------------------------------------------------------
 namespace
 {
-volatile std::sig_atomic_t g_SignalStatus;
+std::atomic<bool> g_Quit{false};
 
-void signalHandler(int status)
+void signalHandler(int)
 {
-    g_SignalStatus = status;
+    g_Quit = true;
 }
 
 unsigned int getNeuronIndex(unsigned int width, unsigned int x, unsigned int y)
@@ -57,7 +58,7 @@ unsigned int getNeuronIndex(unsigned int width, unsigned int x, unsigned int y)
     return x + (y * width);
 }
 
-void loadEvents(const std::string &filename)
+float loadEvents(const std::string &filename)
 {
     // **HACK** header size
     constexpr std::streamoff headerBytes = 104;
@@ -99,7 +100,12 @@ void loadEvents(const std::string &filename)
                                 events.end());
 
     std::cout << events.size() << " positive polarity events" << std::endl;
-
+    
+    // Stash time of last event
+    const float lastEventMs = (float)events.back().second / 1000.0f;
+    
+    std::cout << "Duration " << lastEventMs << "ms" << std::endl;
+    
     // Loop through spikes
     std::vector<size_t> numEvents(Parameters::inputWidth * Parameters::inputHeight, 0);
     for (auto &e : events) {
@@ -134,7 +140,11 @@ void loadEvents(const std::string &filename)
     std::transform(events.cbegin(), events.cend(), spikeTimesDVS,
                    [](std::pair<uint32_t, uint32_t> e) { return (float)e.second / 1000.0f; });
     
+    // Upload event times to device
     pushspikeTimesDVSToDevice(events.size());
+    
+    // Return duration
+    return lastEventMs;
 }
 
 void buildCentreToMacroConnection(unsigned int *rowLength, unsigned int *ind)
@@ -264,7 +274,7 @@ void displayThreadHandler(std::mutex &inputMutex, const cv::Mat &inputImage, std
     const unsigned int outputImageHeight = Parameters::detectorHeight * Parameters::outputScale;
     cv::Mat outputImage(outputImageHeight, outputImageWidth, CV_8UC3);
 
-    while(g_SignalStatus == 0){
+    while(!g_Quit){
         // Clear background
         outputImage.setTo(cv::Scalar::all(0));
 
@@ -330,6 +340,7 @@ void applyInputSpikes(uint32_t *inputSpikes, cv::Mat &inputImage)
     // Decay image
     inputImage *= Parameters::spikePersistence;
 }
+
 void applyOutputSpikes(uint32_t *outputSpikes, 
                        float (&output)[Parameters::detectorWidth][Parameters::detectorHeight][Parameters::DetectorAxisMax])
 {
@@ -400,7 +411,7 @@ int main()
     allocateMem();
     allocateRecordingBuffers(1);
     initialize();
-    loadEvents("17-03-30_12-53-58_1098500000_1158500000_td.dat");
+    const float lastEventMs = loadEvents("17-03-30_12-53-58_1098500000_1158500000_td.dat");
     buildCentreToMacroConnection(rowLengthDVS_MacroPixel, indDVS_MacroPixel);
     buildDetectors(rowLengthMacroPixel_Flow_Excitatory, indMacroPixel_Flow_Excitatory,
                    rowLengthMacroPixel_Flow_Inhibitory, indMacroPixel_Flow_Inhibitory);
@@ -425,13 +436,11 @@ int main()
     // Duration counters
     std::chrono::duration<double> sleepTime{0};
     std::chrono::duration<double> overrunTime{0};
-    unsigned int i = 0;
     
     // Catch interrupt (ctrl-c) signals
     std::signal(SIGINT, signalHandler);
-
-    for(i = 0; g_SignalStatus == 0; i++)
-    {
+    const unsigned long long durationTimesteps = (unsigned long long)std::ceil(lastEventMs / DT);
+    while(!g_Quit) {
         auto tickStart = std::chrono::high_resolution_clock::now();
         {
             TimerAccumulate timer(step);
@@ -467,13 +476,18 @@ int main()
         else {
             overrunTime += (tickDuration - dtDuration);
         }
+        
+        // Set quit flag
+        if(iT == durationTimesteps) {
+            g_Quit = true;
+        }
     }
 
     // Wait for display thread to die
     displayThread.join();
 
-    std::cout << "Ran for " << i << " " << DT << "ms timesteps, overan for " << overrunTime.count() << "s, slept for " << sleepTime.count() << "s" << std::endl;
-    std::cout << "Average step:" << (step * 1000.0) / i << "s, Render:" << (render * 1000.0) / i<< std::endl;
+    std::cout << "Ran for " << iT << " " << DT << "ms timesteps, overan for " << overrunTime.count() << "s, slept for " << sleepTime.count() << "s" << std::endl;
+    std::cout << "Average step:" << (step * 1000.0) / iT << "s, Render:" << (render * 1000.0) / iT << "s" << std::endl;
 
     return 0;
 }
